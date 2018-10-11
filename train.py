@@ -129,7 +129,7 @@ def IOU_cal(y_true, y_pred):
     iou_res = []
     for i in range(len(y_true)):
         y_true_flat = y_true[i].ravel()
-        y_pred_flat = (y_pred[i].ravel() > 0.5) * 1
+        y_pred_flat = (y_pred[i][...,1].ravel() > 0.5) * 1
         intersection = np.sum(y_true_flat * y_pred_flat)
         union = np.sum((y_true_flat+y_pred_flat) - (y_true_flat*y_pred_flat))
         iou = intersection / union
@@ -194,7 +194,7 @@ model.compile(optimizer="Adam",
 early = tf.keras.callbacks.EarlyStopping(monitor="val_loss", patience=12, verbose=1)
 check = tf.keras.callbacks.ModelCheckpoint(monitor="val_loss",
                                         filepath="test_resize.h5",
-                                        verbose=1, save_best_only=True, save_weights_only=True)
+                                        verbose=1, save_best_only=True)
 
 reduce = tf.keras.callbacks.ReduceLROnPlateau(patience=3)
 
