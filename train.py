@@ -11,6 +11,7 @@ import sys
 
 import os
 import random
+import time
 import skimage
 from skimage import io, img_as_bool
 from skimage.transform import resize
@@ -97,14 +98,14 @@ def read_data_and_split(split_seed, train_ratio, is_normalize=True, is_resize=cr
     y_train = np.array([skimage.io.imread('dataset/{}/mask/{}_mask.jpg'.format(x, x))[..., 0]\
                     for x in train_idx])
     
-    y_test = np.array([cskimage.io.imread('dataset/{}/mask/{}_mask.jpg'.format(x, x))[..., 0]\
+    y_test = np.array([skimage.io.imread('dataset/{}/mask/{}_mask.jpg'.format(x, x))[..., 0]\
                         for x in test_idx])
     
     y_train = img_as_bool(y_train)
     y_test = img_as_bool(y_test)
     
     def cv2_resize(array):
-        return np.array([resize(x, (crop_size,crop_size)) for x in array])
+        return np.array([resize(x, (crop_size, crop_size)) for x in array])
     
     if is_resize:
         x_train, x_test, y_train, y_test = cv2_resize(x_train), cv2_resize(x_test), cv2_resize(y_train), cv2_resize(y_test)
@@ -150,80 +151,67 @@ def IOU_cal(y_true, y_pred):
 #         if i == len(y_test):
 #             i=0
 
-if __name__ == '__main__':
-    import argparse
 
-    # Parse command line arguments
-    parser = argparse.ArgumentParser(
-        description='Mask R-CNN for nuclei counting and segmentation')
-
-#     parser.add_argument('--num_gpus', required=True,
-#                         default=1, type=int,
-#                         help='num of gpus usage')
-
-    args = parser.parse_args()
     
-#     x_train, x_test, y_train, y_test = read_data_and_split(split_seed=7, train_ratio=0.8)
+x_train, x_test, y_train, y_test = read_data_and_split(split_seed=7, train_ratio=0.8)
 
-#     y_train_inv = np.where(y_train, 0, 1)
-#     y_train_ = np.zeros(shape=(len(y_train), crop_size, crop_size, 2))
-#     y_train_[:,:,:,0] = y_train
-#     y_train_[:,:,:,1] = y_train_inv
+y_train_inv = np.where(y_train, 0, 1)
+y_train_ = np.zeros(shape=(len(y_train), crop_size, crop_size, 2))
+y_train_[:,:,:,0] = y_train
+y_train_[:,:,:,1] = y_train_inv
 
-#     y_test_inv = np.where(y_test, 0, 1)
-#     y_test_ = np.zeros(shape=(len(y_test), crop_size, crop_size, 2))
-#     y_test_[:,:,:,0] = y_test
-#     y_test_[:,:,:,1] = y_test_inv
+y_test_inv = np.where(y_test, 0, 1)
+y_test_ = np.zeros(shape=(len(y_test), crop_size, crop_size, 2))
+y_test_[:,:,:,0] = y_test
+y_test_[:,:,:,1] = y_test_inv
 
-#     print("Data shape:")
-#     print(x_train.shape)
-#     print(x_test.shape)
-#     print(y_train.shape)
-#     print(y_test.shape)
-       
+print("Data shape:")
+print(x_train.shape)
+print(x_test.shape)
+print(y_train.shape)
+print(y_test.shape)
+
 #     model = Deeplabv3(input_shape=(crop_size, crop_size, 3), classes=2, OS=8)
 #     logits = model.output
 #     output = tf.keras.layers.Activation("softmax")(logits)
 #     model = tf.keras.models.Model(model.input, output)
 
-    model = get_unet()
+model = get_unet()
 
-    def dice_coef_loss(y_true, y_pred, smooth=1):
-        def dice_coef_fix(y_true, y_pred):
-            intersection = K.sum(K.abs(y_true * y_pred), axis = -1)
-            iou = (2. * intersection + smooth) / (K.sum(K.square(y_true), -1) + K.sum(K.square(y_pred),-1) + smooth)
-            return iou
-        loss = 1 - dice_coef_fix(y_true, y_pred)
-        return loss
+def dice_coef_loss(y_true, y_pred, smooth=1):
+    def dice_coef_fix(y_true, y_pred):
+        intersection = K.sum(K.abs(y_true * y_pred), axis = -1)
+        iou = (2. * intersection + smooth) / (K.sum(K.square(y_true), -1) + K.sum(K.square(y_pred),-1) + smooth)
+        return iou
+    loss = 1 - dice_coef_fix(y_true, y_pred)
+    return loss
 
 #     model_gpu = tf.keras.utils.multi_gpu_model(model, gpus=args.num_gpus)
 
-    model.compile(optimizer="Adam",
-                  loss='categorical_crossentropy')
+model.compile(optimizer="Adam",
+              loss='categorical_crossentropy')
 
-    early = tf.keras.callbacks.EarlyStopping(monitor="val_loss", patience=12, verbose=1)
-    check = tf.keras.callbacks.ModelCheckpoint(monitor="val_loss",
-                                            filepath="test_resize.h5",
-                                            verbose=1, save_best_only=True, save_weights_only=True)
+early = tf.keras.callbacks.EarlyStopping(monitor="val_loss", patience=12, verbose=1)
+check = tf.keras.callbacks.ModelCheckpoint(monitor="val_loss",
+                                        filepath="test_resize.h5",
+                                        verbose=1, save_best_only=True, save_weights_only=True)
 
-    reduce = tf.keras.callbacks.ReduceLROnPlateau(patience=3)
+reduce = tf.keras.callbacks.ReduceLROnPlateau(patience=3)
 
-    t = time.time()
-    model_gpu.fit_generator(data_gen(x_train, y_train_, 12),
-                        steps_per_epoch=2,
-                        epochs=3, 
-                        validation_data=(x_test, y_test_),
-                        callbacks=[early, check, reduce]
-                       )
-    model_gpu = tf.keras.model.load_model("test_resize.h5")
-    ## inference
-    _, x_test, _, y_test = read_data_and_split(split_seed=7, train_ratio=0.8, is_resize=1000)
-    
-    y_pred = model_gpu.predict(x_test)
-    
-    res_iou = IOU_cal(y_test, y_pred)
-    print("TESTING IOU: ",np.mean(res_iou))
-    print("-"*10)
-    print("Elapse time:", time.time() - t)
-    
-    
+t = time.time()
+model.fit_generator(data_gen(x_train, y_train_, 12),
+                    steps_per_epoch=2,
+                    epochs=3, 
+                    validation_data=(x_test, y_test_),
+                    callbacks=[early, check, reduce]
+                   )
+model = tf.keras.models.load_model("test_resize.h5")
+## inference
+_, x_test, _, y_test = read_data_and_split(split_seed=7, train_ratio=0.8, is_resize=1000)
+
+y_pred = model.predict(x_test)
+
+res_iou = IOU_cal(y_test, y_pred)
+print("TESTING IOU: ",np.mean(res_iou))
+print("-"*10)
+print("Elapse time:", time.time() - t)
