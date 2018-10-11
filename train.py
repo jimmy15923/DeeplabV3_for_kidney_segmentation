@@ -16,6 +16,7 @@ import skimage
 from skimage import io, img_as_bool
 from skimage.transform import resize
 
+
 # config
 crop_size = 512
 
@@ -59,7 +60,7 @@ def get_unet():
     conv9 = tf.keras.layers.Conv2D(64, (3, 3), activation='relu', padding='SAME')(up9)
     conv9 = tf.keras.layers.Conv2D(64, (3, 3), activation='relu', padding='SAME')(conv9)
 
-    conv10 = tf.keras.layers.Conv2D(2, (1, 1), activation='softmax')(conv9)
+    conv10 = tf.keras.layers.Conv2D(1, (1, 1), activation='sigmoid')(conv9)
 
     model = tf.keras.models.Model(inputs=inputs, outputs=conv10)
 
@@ -95,14 +96,14 @@ def read_data_and_split(split_seed, train_ratio, is_normalize=True, is_resize=cr
         x_train = (x_train / 127.5) - 1
         x_test = (x_test / 127.5) - 1
         
-    y_train = np.array([skimage.io.imread('dataset/{}/mask/{}_mask.jpg'.format(x, x))[..., 0]\
+    y_train = np.array([skimage.io.imread('dataset/{}/mask/{}_mask.jpg'.format(x, x))\
                     for x in train_idx])
     
-    y_test = np.array([skimage.io.imread('dataset/{}/mask/{}_mask.jpg'.format(x, x))[..., 0]\
+    y_test = np.array([skimage.io.imread('dataset/{}/mask/{}_mask.jpg'.format(x, x))\
                         for x in test_idx])
     
-    y_train = img_as_bool(y_train)
-    y_test = img_as_bool(y_test)
+    y_train = np.expand_dims(y_train, 3)
+    y_test = np.expand_dims(y_test, 3)
     
     def cv2_resize(array):
         return np.array([resize(x, (crop_size, crop_size)) for x in array])
@@ -116,7 +117,7 @@ def data_gen(x_train, y_train, bz, augmentation=None):
     i = 0
     from sklearn.utils import shuffle
     while True:
-        if i == len(y_train):
+        if i == len(y_train) // bz:
             i = 0
             x_train, y_train = shuffle(x_train, y_train)
             
@@ -155,15 +156,16 @@ def IOU_cal(y_true, y_pred):
     
 x_train, x_test, y_train, y_test = read_data_and_split(split_seed=7, train_ratio=0.8)
 
-y_train_inv = np.where(y_train, 0, 1)
-y_train_ = np.zeros(shape=(len(y_train), crop_size, crop_size, 2))
-y_train_[:,:,:,0] = y_train
-y_train_[:,:,:,1] = y_train_inv
 
-y_test_inv = np.where(y_test, 0, 1)
-y_test_ = np.zeros(shape=(len(y_test), crop_size, crop_size, 2))
-y_test_[:,:,:,0] = y_test
-y_test_[:,:,:,1] = y_test_inv
+# y_train_inv = np.where(y_train, 0, 1)
+# y_train_ = np.zeros(shape=(len(y_train), crop_size, crop_size, 2))
+# y_train_[:,:,:,0] = y_train
+# y_train_[:,:,:,1] = y_train_inv
+
+# y_test_inv = np.where(y_test, 0, 1)
+# y_test_ = np.zeros(shape=(len(y_test), crop_size, crop_size, 2))
+# y_test_[:,:,:,0] = y_test
+# y_test_[:,:,:,1] = y_test_inv
 
 print("Data shape:")
 print(x_train.shape)
@@ -180,8 +182,9 @@ model = get_unet()
 
 def dice_coef_loss(y_true, y_pred, smooth=1):
     def dice_coef_fix(y_true, y_pred):
-        intersection = K.sum(K.abs(y_true * y_pred), axis = -1)
-        iou = (2. * intersection + smooth) / (K.sum(K.square(y_true), -1) + K.sum(K.square(y_pred),-1) + smooth)
+        intersection = tf.keras.backend.sum(tf.keras.backend.abs(y_true * y_pred), axis = -1)
+        iou = (2. * intersection + smooth) / (tf.keras.backend.sum(tf.keras.backend.square(y_true), -1) +\
+                                              tf.keras.backend.sum(tf.keras.backend.square(y_pred),-1) + smooth)
         return iou
     loss = 1 - dice_coef_fix(y_true, y_pred)
     return loss
@@ -189,7 +192,7 @@ def dice_coef_loss(y_true, y_pred, smooth=1):
 #     model_gpu = tf.keras.utils.multi_gpu_model(model, gpus=args.num_gpus)
 
 model.compile(optimizer="Adam",
-              loss='categorical_crossentropy')
+              loss=dice_coef_loss)
 
 early = tf.keras.callbacks.EarlyStopping(monitor="val_loss", patience=12, verbose=1)
 check = tf.keras.callbacks.ModelCheckpoint(monitor="val_loss",
@@ -199,10 +202,10 @@ check = tf.keras.callbacks.ModelCheckpoint(monitor="val_loss",
 reduce = tf.keras.callbacks.ReduceLROnPlateau(patience=3)
 
 t = time.time()
-model.fit_generator(data_gen(x_train, y_train_, 12),
-                    steps_per_epoch=2,
-                    epochs=3, 
-                    validation_data=(x_test, y_test_),
+model.fit_generator(data_gen(x_train, y_train, 12),
+                    steps_per_epoch=60,
+                    epochs=30, 
+                    validation_data=(x_test, y_test),
                     callbacks=[early, check, reduce]
                    )
 model = tf.keras.models.load_model("test_resize.h5")
