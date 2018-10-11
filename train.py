@@ -18,12 +18,9 @@ from skimage.transform import resize
 # config
 crop_size = 512
 
-from keras.layers import Dense, Conv2D, Input, MaxPooling2D, concatenate, Conv2DTranspose
-from keras.models import Model
-
 def get_unet():
   
-    inputs = Input((crop_size, crop_size, 3))
+    inputs = tf.keras.layers.Input((crop_size, crop_size, 3))
     
     conv1 = tf.keras.layers.Conv2D(32, (3, 3), activation='relu', padding='SAME')(inputs)
     conv1 = tf.keras.layers.Conv2D(32, (3, 3), activation='relu', padding='SAME')(conv1)
