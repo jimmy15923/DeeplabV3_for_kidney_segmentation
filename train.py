@@ -198,7 +198,7 @@ if __name__ == '__main__':
 
 #     model_gpu = tf.keras.utils.multi_gpu_model(model, gpus=args.num_gpus)
 
-    model.compile(optimizer=keras.optimizers.SGD(lr=1e-3, momentum=0.9, nesterov=True),
+    model.compile(optimizer="Adam",
                   loss='categorical_crossentropy')
 
     early = tf.keras.callbacks.EarlyStopping(monitor="val_loss", patience=12, verbose=1)
