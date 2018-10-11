@@ -6,8 +6,8 @@ import shutil
 from sklearn.cross_validation import train_test_split
 import tensorflow as tf
 import sys
-sys.path.append('keras-deeplab-v3-plus/')
-from deeplab_v3_plus.model import *
+# sys.path.append('keras-deeplab-v3-plus/')
+# from deeplab_v3_plus.model import *
 
 import os
 import random
