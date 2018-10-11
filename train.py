@@ -1,6 +1,5 @@
 import glob
 import pandas 
-import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 import shutil
@@ -12,6 +11,7 @@ from deeplab_v3_plus.model import *
 
 import os
 import random
+import skimage
 from skimage import io, img_as_bool
 from skimage.transform import resize
 
@@ -21,10 +21,9 @@ crop_size = 512
 from keras.layers import Dense, Conv2D, Input, MaxPooling2D, concatenate, Conv2DTranspose
 from keras.models import Model
 
-def get_unet(fig_size=(128,128) ):
-    """定義UNet模型架構。"""
-    
-    inputs = Input( (*fig_size,3) )
+def get_unet():
+  
+    inputs = Input((crop_size, crop_size, 3))
     
     conv1 = tf.keras.layers.Conv2D(32, (3, 3), activation='relu', padding='SAME')(inputs)
     conv1 = tf.keras.layers.Conv2D(32, (3, 3), activation='relu', padding='SAME')(conv1)
@@ -89,19 +88,19 @@ def read_data_and_split(split_seed, train_ratio, is_normalize=True, is_resize=cr
     
     train_idx, test_idx = idx[:int(len(idx)*train_ratio)], idx[int(len(idx)*train_ratio):]
 
-    x_train = np.array([cv2.imread('dataset/{}/image/{}_slide.jpg'.format(x, x))[...,::-1]\
+    x_train = np.array([skimage.io.imread('dataset/{}/image/{}_slide.jpg'.format(x, x))\
                     for x in train_idx], dtype="float32")
-    x_test = np.array([cv2.imread('dataset/{}/image/{}_slide.jpg'.format(x, x))[...,::-1]\
+    x_test = np.array([skimage.io.imread('dataset/{}/image/{}_slide.jpg'.format(x, x))\
                        for x in test_idx], dtype="float32")
     
     if is_normalize:
         x_train = (x_train / 127.5) - 1
         x_test = (x_test / 127.5) - 1
         
-    y_train = np.array([cv2.imread('dataset/{}/mask/{}_mask.jpg'.format(x, x))[..., 0]\
+    y_train = np.array([skimage.io.imread('dataset/{}/mask/{}_mask.jpg'.format(x, x))[..., 0]\
                     for x in train_idx])
     
-    y_test = np.array([cv2.imread('dataset/{}/mask/{}_mask.jpg'.format(x, x))[..., 0]\
+    y_test = np.array([cskimage.io.imread('dataset/{}/mask/{}_mask.jpg'.format(x, x))[..., 0]\
                         for x in test_idx])
     
     y_train = img_as_bool(y_train)
@@ -161,9 +160,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='Mask R-CNN for nuclei counting and segmentation')
 
-    parser.add_argument('--num_gpus', required=True,
-                        default=1, type=int,
-                        help='num of gpus usage')
+#     parser.add_argument('--num_gpus', required=True,
+#                         default=1, type=int,
+#                         help='num of gpus usage')
 
     args = parser.parse_args()
     
@@ -190,7 +189,7 @@ if __name__ == '__main__':
 #     output = tf.keras.layers.Activation("softmax")(logits)
 #     model = tf.keras.models.Model(model.input, output)
 
-    model = get_unet(fig_size=(crop_size,crop_size))
+    model = get_unet()
 
     def dice_coef_loss(y_true, y_pred, smooth=1):
         def dice_coef_fix(y_true, y_pred):
@@ -200,9 +199,9 @@ if __name__ == '__main__':
         loss = 1 - dice_coef_fix(y_true, y_pred)
         return loss
 
-    model_gpu = tf.keras.utils.multi_gpu_model(model, gpus=args.num_gpus)
+#     model_gpu = tf.keras.utils.multi_gpu_model(model, gpus=args.num_gpus)
 
-    model_gpu.compile(optimizer=keras.optimizers.SGD(lr=1e-3, momentum=0.9, nesterov=True),
+    model.compile(optimizer=keras.optimizers.SGD(lr=1e-3, momentum=0.9, nesterov=True),
                   loss='categorical_crossentropy')
 
     early = tf.keras.callbacks.EarlyStopping(monitor="val_loss", patience=12, verbose=1)
