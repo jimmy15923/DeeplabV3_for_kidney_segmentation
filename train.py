@@ -208,11 +208,19 @@ check = tf.keras.callbacks.ModelCheckpoint(monitor="val_loss",
 reduce = tf.keras.callbacks.ReduceLROnPlateau(patience=3)
 
 t = time.time()
-model.fit(x_train, y_train, batch_size=batch_size,
+history = model.fit(x_train, y_train, batch_size=batch_size,
                     epochs=10, 
                     validation_data=(x_test, y_test),
                     callbacks=[early, check, reduce]
                    )
+
+plt.plot(history.history['loss'])
+plt.plot(history.history['val_loss'])
+plt.title('model loss')
+plt.ylabel('loss')
+plt.xlabel('epoch')
+plt.legend(['train', 'test'], loc='upper left')
+plt.savefig("learning_curve.png", dpi=500)
 
 model = tf.keras.models.load_model("test_resize.h5", custom_objects = {'mean_iou': mean_iou,
                                                                        'dice_metric': dice_metric})
