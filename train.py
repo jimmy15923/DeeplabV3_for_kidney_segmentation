@@ -6,8 +6,6 @@ import shutil
 from sklearn.cross_validation import train_test_split
 import tensorflow as tf
 import sys
-# sys.path.append('keras-deeplab-v3-plus/')
-# from deeplab_v3_plus.model import *
 
 import os
 import random
@@ -130,12 +128,13 @@ def IOU_cal(y_true, y_pred):
     iou_res = []
     for i in range(len(y_true)):
         y_true_flat = y_true[i].ravel()
-        y_pred_flat = (y_pred[i][...,1].ravel() > 0.5) * 1
+        y_pred_flat = (y_pred[i][...,0].ravel() > 0.5) * 1
         intersection = np.sum(y_true_flat * y_pred_flat)
         union = np.sum((y_true_flat+y_pred_flat) - (y_true_flat*y_pred_flat))
         iou = intersection / union
         iou_res.append(iou)
-    return iou_res        
+    return iou_res     
+
 # def val_gen(x_test, y_test, crop_size=500, stride=500):
 #     i = 0
 #     while True:
@@ -153,7 +152,6 @@ def IOU_cal(y_true, y_pred):
 #             i=0
 
 
-    
 x_train, x_test, y_train, y_test = read_data_and_split(split_seed=7, train_ratio=0.8)
 
 
@@ -180,19 +178,22 @@ print(y_test.shape)
 
 model = get_unet()
 
-def dice_coef_loss(y_true, y_pred, smooth=1):
-    def dice_coef_fix(y_true, y_pred):
-        intersection = tf.keras.backend.sum(tf.keras.backend.abs(y_true * y_pred), axis = -1)
-        iou = (2. * intersection + smooth) / (tf.keras.backend.sum(tf.keras.backend.square(y_true), -1) +\
-                                              tf.keras.backend.sum(tf.keras.backend.square(y_pred),-1) + smooth)
-        return iou
-    loss = 1 - dice_coef_fix(y_true, y_pred)
-    return loss
+def dice_metric(y_true, y_pred, smooth = 1.E-6):
+    
+    y_true_f = tf.keras.backend.flatten(y_true)
+    y_pred_f = tf.keras.backend.flatten(y_pred)
+    intersection = tf.keras.backend.sum(y_true_f * y_pred_f)
+    
+    return 2.*intersection  / (tf.keras.backend.sum(y_true_f) + tf.keras.backend.sum(y_pred_f) + smooth)
+
+def dice_loss(y_true, y_pred):
+    return -dice_metric(y_true, y_pred)
 
 #     model_gpu = tf.keras.utils.multi_gpu_model(model, gpus=args.num_gpus)
 
 model.compile(optimizer="Adam",
-              loss=dice_coef_loss)
+              loss=dice_loss,
+              metrics=[dice_metric])
 
 early = tf.keras.callbacks.EarlyStopping(monitor="val_loss", patience=12, verbose=1)
 check = tf.keras.callbacks.ModelCheckpoint(monitor="val_loss",
@@ -204,11 +205,13 @@ reduce = tf.keras.callbacks.ReduceLROnPlateau(patience=3)
 t = time.time()
 model.fit_generator(data_gen(x_train, y_train, 12),
                     steps_per_epoch=60,
-                    epochs=30, 
+                    epochs=10, 
                     validation_data=(x_test, y_test),
                     callbacks=[early, check, reduce]
                    )
-model = tf.keras.models.load_model("test_resize.h5")
+
+model = tf.keras.models.load_model("test_resize.h5", custom_objects={'dice_loss': dice_loss,
+                                                                     'dice_metric': dice_metric})
 ## inference
 _, x_test, _, y_test = read_data_and_split(split_seed=7, train_ratio=0.8, is_resize=1000)
 
