@@ -16,54 +16,68 @@ import skimage
 from skimage import io, img_as_bool
 from skimage.transform import resize
 
-
 # config
-crop_size = 1024
+crop_size = 512
+batch_size = 8
 
-def get_unet():
-  
-    inputs = tf.keras.layers.Input((crop_size, crop_size, 3))
+def conv2d_block(input_tensor, n_filters, kernel_size=3, batchnorm=True):
+    # first layer
+    x = tf.keras.layers.Conv2D(filters=n_filters, kernel_size=(kernel_size, kernel_size),
+                               kernel_initializer="he_normal", padding="same")(input_tensor)
+    if batchnorm:
+        x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.keras.layers.Activation("relu")(x)
+    # second layer
+    x = tf.keras.layers.Conv2D(filters=n_filters, kernel_size=(kernel_size, kernel_size), kernel_initializer="he_normal",
+               padding="same")(x)
+    if batchnorm:
+        x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.keras.layers.Activation("relu")(x)
+    return x
+
+def get_unet(input_img, n_filters=16, dropout=0.5, batchnorm=True):
+    # contracting path
+    c1 = conv2d_block(input_img, n_filters=n_filters*1, kernel_size=3, batchnorm=batchnorm)
+    p1 = tf.keras.layers.MaxPooling2D((2, 2)) (c1)
+    p1 = tf.keras.layers.Dropout(dropout*0.5)(p1)
+
+    c2 = conv2d_block(p1, n_filters=n_filters*2, kernel_size=3, batchnorm=batchnorm)
+    p2 = tf.keras.layers.MaxPooling2D((2, 2)) (c2)
+    p2 = tf.keras.layers.Dropout(dropout)(p2)
+
+    c3 = conv2d_block(p2, n_filters=n_filters*4, kernel_size=3, batchnorm=batchnorm)
+    p3 = tf.keras.layers.MaxPooling2D((2, 2)) (c3)
+    p3 = tf.keras.layers.Dropout(dropout)(p3)
+
+    c4 = conv2d_block(p3, n_filters=n_filters*8, kernel_size=3, batchnorm=batchnorm)
+    p4 = tf.keras.layers.MaxPooling2D(pool_size=(2, 2)) (c4)
+    p4 = tf.keras.layers.Dropout(dropout)(p4)
     
-    conv1 = tf.keras.layers.Conv2D(32, (3, 3), activation='relu', padding='SAME')(inputs)
-    conv1 = tf.keras.layers.Conv2D(32, (3, 3), activation='relu', padding='SAME')(conv1)
-    pool1 = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(conv1)
-
-    conv2 = tf.keras.layers.Conv2D(64, (3, 3), activation='relu', padding='SAME')(pool1)
-    conv2 = tf.keras.layers.Conv2D(64, (3, 3), activation='relu', padding='SAME')(conv2)
-    pool2 = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(conv2)
-
-    conv3 = tf.keras.layers.Conv2D(128, (3, 3), activation='relu', padding='SAME')(pool2)
-    conv3 = tf.keras.layers.Conv2D(128, (3, 3), activation='relu', padding='SAME')(conv3)
-    pool3 = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(conv3)
-
-    conv4 = tf.keras.layers.Conv2D(256, (3, 3), activation='relu', padding='SAME')(pool3)
-    conv4 = tf.keras.layers.Conv2D(256, (3, 3), activation='relu', padding='SAME')(conv4)
-    pool4 = tf.keras.layers.MaxPooling2D(pool_size=(2, 2))(conv4)
-
-    conv5 = tf.keras.layers.Conv2D(512, (3, 3), activation='relu', padding='SAME')(pool4)
-    conv5 = tf.keras.layers.Conv2D(512, (3, 3), activation='relu', padding='SAME')(conv5)
-
-    up6 = tf.keras.layers.concatenate([tf.keras.layers.Conv2DTranspose(64, kernel_size=(2, 2), strides=(2, 2), padding='SAME')(conv5), conv4], axis=3)
-    conv6 = tf.keras.layers.Conv2D(256, (3, 3), activation='relu', padding='SAME')(up6)
-    conv6 = tf.keras.layers.Conv2D(256, (3, 3), activation='relu', padding='SAME')(conv6)
-
-    up7 = tf.keras.layers.concatenate([tf.keras.layers.Conv2DTranspose(32, kernel_size=(2, 2), strides=(2, 2), padding='SAME')(conv6), conv3], axis=3)
-    conv7 = tf.keras.layers.Conv2D(128, (3, 3), activation='relu', padding='SAME')(up7)
-    conv7 = tf.keras.layers.Conv2D(128, (3, 3), activation='relu', padding='SAME')(conv7)
-
-    up8 = tf.keras.layers.concatenate([tf.keras.layers.Conv2DTranspose(16, kernel_size=(2, 2), strides=(2, 2), padding='SAME')(conv7), conv2], axis=3)
-    conv8 = tf.keras.layers.Conv2D(64, (3, 3), activation='relu', padding='SAME')(up8)
-    conv8 = tf.keras.layers.Conv2D(64, (3, 3), activation='relu', padding='SAME')(conv8)
-
-    up9 = tf.keras.layers.concatenate([tf.keras.layers.Conv2DTranspose(8, kernel_size=(2, 2), strides=(2, 2), padding='SAME')(conv8), conv1], axis=3)
+    c5 = conv2d_block(p4, n_filters=n_filters*16, kernel_size=3, batchnorm=batchnorm)
     
-    conv9 = tf.keras.layers.Conv2D(64, (3, 3), activation='relu', padding='SAME')(up9)
-    conv9 = tf.keras.layers.Conv2D(64, (3, 3), activation='relu', padding='SAME')(conv9)
+    # expansive path
+    u6 = tf.keras.layers.Conv2DTranspose(n_filters*8, (3, 3), strides=(2, 2), padding='same') (c5)
+    u6 = tf.keras.layers.concatenate([u6, c4])
+    u6 = tf.keras.layers.Dropout(dropout)(u6)
+    c6 = conv2d_block(u6, n_filters=n_filters*8, kernel_size=3, batchnorm=batchnorm)
 
-    conv10 = tf.keras.layers.Conv2D(1, (1, 1), activation='sigmoid')(conv9)
+    u7 = tf.keras.layers.Conv2DTranspose(n_filters*4, (3, 3), strides=(2, 2), padding='same') (c6)
+    u7 = tf.keras.layers.concatenate([u7, c3])
+    u7 = tf.keras.layers.Dropout(dropout)(u7)
+    c7 = conv2d_block(u7, n_filters=n_filters*4, kernel_size=3, batchnorm=batchnorm)
 
-    model = tf.keras.models.Model(inputs=inputs, outputs=conv10)
+    u8 = tf.keras.layers.Conv2DTranspose(n_filters*2, (3, 3), strides=(2, 2), padding='same') (c7)
+    u8 = tf.keras.layers.concatenate([u8, c2])
+    u8 = tf.keras.layers.Dropout(dropout)(u8)
+    c8 = conv2d_block(u8, n_filters=n_filters*2, kernel_size=3, batchnorm=batchnorm)
 
+    u9 = tf.keras.layers.Conv2DTranspose(n_filters*1, (3, 3), strides=(2, 2), padding='same') (c8)
+    u9 = tf.keras.layers.concatenate([u9, c1], axis=3)
+    u9 = tf.keras.layers.Dropout(dropout)(u9)
+    c9 = conv2d_block(u9, n_filters=n_filters*1, kernel_size=3, batchnorm=batchnorm)
+    
+    outputs = tf.keras.layers.Conv2D(1, (1, 1), activation='sigmoid') (c9)
+    model = tf.keras.models.Model(inputs=[input_img], outputs=[outputs])
     return model
 
 def image_pad(image):
@@ -133,7 +147,7 @@ def read_data_and_split(split_seed, train_ratio, is_normalize=True, is_resize=cr
         return np.array([image_pad(x) for x in array])
 
     if is_resize:
-        if is_resize >= 1000:
+        if is_resize <= 1000:
             x_train, x_test, y_train, y_test = arr_resize(x_train), arr_resize(x_test), arr_resize(y_train), arr_resize(y_test)
         else:       
             x_train, x_test, y_train, y_test = arr_pad(x_train), arr_pad(x_test), arr_pad(y_train), arr_pad(y_test)
@@ -144,14 +158,14 @@ def data_gen(x_train, y_train, bz, augmentation=None):
     i = 0
     from sklearn.utils import shuffle
     while True:
-        if i == len(y_train) // bz:
-            i = 0
-            x_train, y_train = shuffle(x_train, y_train)
+#         if i == len(y_train) // bz:
+#             i = 0
+#             x_train, y_train = shuffle(x_train, y_train)
             
-        x_, y_ = x_train[i*bz:(i+1)*bz], y_train[i*bz:(i+1)*bz]
-#         img_idx = np.random.choice(range(len(y_train)), bz, replace=False)
+#         x_, y_ = x_train[i*bz:(i+1)*bz], y_train[i*bz:(i+1)*bz]
+        img_idx = np.random.choice(range(len(y_train)), bz, replace=False)
         i += 1
-        yield x_, y_
+        yield x_train[img_idx], y_train[img_idx]
         
 def IOU_cal(y_true, y_pred):
     iou_res = []
@@ -164,35 +178,8 @@ def IOU_cal(y_true, y_pred):
         iou_res.append(iou)
     return iou_res     
 
-# def val_gen(x_test, y_test, crop_size=500, stride=500):
-#     i = 0
-#     while True:
-#         x = []
-#         y = []
-#         for x_start in range(0, crop_size+1, stride):
-#             for y_start in range(0, crop_size+1, stride):
-#                 x_crop = x_test[i][x_start:(x_start+crop_size), y_start:(y_start+crop_size), :]
-#                 y_crop = y_test[i][x_start:(x_start+crop_size), y_start:(y_start+crop_size), :]
-#                 x.append(x_crop)
-#                 y.append(y_crop)
-#         i+=1
-#         yield np.array(x), np.array(y)
-#         if i == len(y_test):
-#             i=0
 
-
-x_train, x_test, y_train, y_test = read_data_and_split(split_seed=7, train_ratio=0.8)
-
-
-# y_train_inv = np.where(y_train, 0, 1)
-# y_train_ = np.zeros(shape=(len(y_train), crop_size, crop_size, 2))
-# y_train_[:,:,:,0] = y_train
-# y_train_[:,:,:,1] = y_train_inv
-
-# y_test_inv = np.where(y_test, 0, 1)
-# y_test_ = np.zeros(shape=(len(y_test), crop_size, crop_size, 2))
-# y_test_[:,:,:,0] = y_test
-# y_test_[:,:,:,1] = y_test_inv
+x_train, x_test, y_train, y_test = read_data_and_split(split_seed=7, train_ratio=0.8, is_resize=crop_size)
 
 print("Data shape:")
 print(x_train.shape)
@@ -200,51 +187,39 @@ print(x_test.shape)
 print(y_train.shape)
 print(y_test.shape)
 
-#     model = Deeplabv3(input_shape=(crop_size, crop_size, 3), classes=2, OS=8)
-#     logits = model.output
-#     output = tf.keras.layers.Activation("softmax")(logits)
-#     model = tf.keras.models.Model(model.input, output)
-
-model = get_unet()
-
-def dice_metric(y_true, y_pred, smooth = 1.E-6):
-    
+def dice_metric(y_true, y_pred, smooth = 1.):   
     y_true_f = tf.keras.backend.flatten(y_true)
     y_pred_f = tf.keras.backend.flatten(y_pred)
-    intersection = tf.keras.backend.sum(y_true_f * y_pred_f)
-    
-    return 2.*intersection  / (tf.keras.backend.sum(y_true_f) + tf.keras.backend.sum(y_pred_f) + smooth)
+    intersection = tf.keras.backend.sum(y_true_f * y_pred_f)    
+    return (2.*intersection + smooth)  / (tf.keras.backend.sum(y_true_f) + tf.keras.backend.sum(y_pred_f) + smooth)
 
 def dice_loss(y_true, y_pred):
-    return -dice_metric(y_true, y_pred)
+    return 1 - dice_metric(y_true, y_pred)
 
-#     model_gpu = tf.keras.utils.multi_gpu_model(model, gpus=args.num_gpus)
+input_img = tf.keras.layers.Input((crop_size, crop_size, 3), name='img')
+model = get_unet(input_img, n_filters=16, dropout=0.05, batchnorm=True)
 
-model.compile(optimizer="Adam",
-              loss=dice_loss,
-              metrics=[dice_metric])
+model.compile(optimizer="Adam", loss="binary_crossentropy", metrics=["accuracy"])
 
 early = tf.keras.callbacks.EarlyStopping(monitor="val_loss", patience=12, verbose=1)
 check = tf.keras.callbacks.ModelCheckpoint(monitor="val_loss",
                                         filepath="test_resize.h5",
                                         verbose=1, save_best_only=True)
-
 reduce = tf.keras.callbacks.ReduceLROnPlateau(patience=3)
 
 t = time.time()
-model.fit_generator(data_gen(x_train, y_train, 8),
-                    steps_per_epoch=60,
+model.fit(x_train, y_train, batch_size=batch_size,
                     epochs=10, 
                     validation_data=(x_test, y_test),
                     callbacks=[early, check, reduce]
                    )
 
-model = tf.keras.models.load_model("test_resize.h5", custom_objects = {'dice_loss': dice_loss,
+model = tf.keras.models.load_model("test_resize.h5", custom_objects = {'mean_iou': mean_iou,
                                                                        'dice_metric': dice_metric})
 ## inference
-_, x_test, _, y_test = read_data_and_split(split_seed=7, train_ratio=0.8, is_resize=1000)
+_, x_test, _, y_test = read_data_and_split(split_seed=7, train_ratio=0.8, is_resize=crop_size)
 
-y_pred = model.predict(x_test)
+y_pred = model.predict(x_test, batch_size=batch_size)
 
 res_iou = IOU_cal(y_test, y_pred)
 print("TESTING IOU: ",np.mean(res_iou))
