@@ -6,6 +6,8 @@ import shutil
 from sklearn.cross_validation import train_test_split
 import tensorflow as tf
 import sys
+# sys.path.append('keras-deeplab-v3-plus/')
+# from deeplab_v3_plus.model import *
 
 import os
 import random
@@ -16,7 +18,7 @@ from skimage.transform import resize
 
 
 # config
-crop_size = 512
+crop_size = 1024
 
 def get_unet():
   
@@ -64,6 +66,27 @@ def get_unet():
 
     return model
 
+def image_pad(image):
+    h, w, _ = image.shape
+    # Height
+    if h % 64 > 0:
+        max_h = h - (h % 64) + 64
+        top_pad = (max_h - h) // 2
+        bottom_pad = max_h - h - top_pad
+    else:
+        top_pad = bottom_pad = 0
+    # Width
+    if w % 64 > 0:
+        max_w = w - (w % 64) + 64
+        left_pad = (max_w - w) // 2
+        right_pad = max_w - w - left_pad
+    else:
+        left_pad = right_pad = 0
+    padding = [(top_pad, bottom_pad), (left_pad, right_pad), (0, 0)]
+    image = np.pad(image, padding, mode='constant', constant_values=0)
+    window = (top_pad, left_pad, h + top_pad, w + left_pad)
+    return image
+
 def read_data_and_split(split_seed, train_ratio, is_normalize=True, is_resize=crop_size):
     """read data into np array, normalize it and train test split
     
@@ -103,11 +126,17 @@ def read_data_and_split(split_seed, train_ratio, is_normalize=True, is_resize=cr
     y_train = np.expand_dims(y_train, 3)
     y_test = np.expand_dims(y_test, 3)
     
-    def cv2_resize(array):
+    def arr_resize(array):
         return np.array([resize(x, (crop_size, crop_size)) for x in array])
     
+    def arr_pad(array):
+        return np.array([image_pad(x) for x in array])
+
     if is_resize:
-        x_train, x_test, y_train, y_test = cv2_resize(x_train), cv2_resize(x_test), cv2_resize(y_train), cv2_resize(y_test)
+        if is_resize >= 1000:
+            x_train, x_test, y_train, y_test = arr_resize(x_train), arr_resize(x_test), arr_resize(y_train), arr_resize(y_test)
+        else:       
+            x_train, x_test, y_train, y_test = arr_pad(x_train), arr_pad(x_test), arr_pad(y_train), arr_pad(y_test)
     
     return x_train, x_test, y_train, y_test
 
@@ -203,15 +232,15 @@ check = tf.keras.callbacks.ModelCheckpoint(monitor="val_loss",
 reduce = tf.keras.callbacks.ReduceLROnPlateau(patience=3)
 
 t = time.time()
-model.fit_generator(data_gen(x_train, y_train, 12),
+model.fit_generator(data_gen(x_train, y_train, 8),
                     steps_per_epoch=60,
                     epochs=10, 
                     validation_data=(x_test, y_test),
                     callbacks=[early, check, reduce]
                    )
 
-model = tf.keras.models.load_model("test_resize.h5", custom_objects={'dice_loss': dice_loss,
-                                                                     'dice_metric': dice_metric})
+model = tf.keras.models.load_model("test_resize.h5", custom_objects = {'dice_loss': dice_loss,
+                                                                       'dice_metric': dice_metric})
 ## inference
 _, x_test, _, y_test = read_data_and_split(split_seed=7, train_ratio=0.8, is_resize=1000)
 
